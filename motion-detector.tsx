@@ -53,48 +53,68 @@ const MotionDetector = () => {
     
     const canvas = canvasRef.current;
     const video = videoRef.current;
+    
+    // Only proceed if video dimensions are valid
+    if (video.videoWidth === 0 || video.videoHeight === 0) {
+      requestRef.current = requestAnimationFrame(detectMotion);
+      return;
+    }
+    
     const context = canvas.getContext('2d', { willReadFrequently: true });
     
     // Set canvas dimensions to match video
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     
-    // Draw current video frame to canvas
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
-    // Get current frame data
-    const currentFrame = context.getImageData(0, 0, canvas.width, canvas.height);
-    
-    // If we have a previous frame, compare them
-    if (previousFrameRef.current) {
-      const currentData = currentFrame.data;
-      const previousData = previousFrameRef.current.data;
+    try {
+      // Draw current video frame to canvas
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
       
-      let motionPixels = 0;
+      // Get current frame data
+      const currentFrame = context.getImageData(0, 0, canvas.width, canvas.height);
       
-      // Compare pixels (only checking every 4th pixel for performance)
-      for (let i = 0; i < currentData.length; i += 16) {
-        // Calculate difference in RGB values
-        const rdiff = Math.abs(currentData[i] - previousData[i]);
-        const gdiff = Math.abs(currentData[i+1] - previousData[i+1]);
-        const bdiff = Math.abs(currentData[i+2] - previousData[i+2]);
+      // If we have a previous frame, compare them
+      if (previousFrameRef.current && 
+          previousFrameRef.current.data && 
+          previousFrameRef.current.width === currentFrame.width && 
+          previousFrameRef.current.height === currentFrame.height) {
         
-        // If the difference exceeds the sensitivity threshold, count as motion
-        if (rdiff > sensitivity || gdiff > sensitivity || bdiff > sensitivity) {
-          motionPixels++;
+        const currentData = currentFrame.data;
+        const previousData = previousFrameRef.current.data;
+        
+        // Make sure the arrays are the same length
+        if (currentData.length === previousData.length) {
+          let motionPixels = 0;
+          const dataLength = Math.min(currentData.length, previousData.length);
+          
+          // Compare pixels (only checking every 4th pixel for performance)
+          // Each pixel has 4 values (R,G,B,A), so we step by 16 to check every 4th pixel
+          for (let i = 0; i < dataLength - 3; i += 16) {
+            // Calculate difference in RGB values
+            const rdiff = Math.abs(currentData[i] - previousData[i]);
+            const gdiff = Math.abs(currentData[i+1] - previousData[i+1]);
+            const bdiff = Math.abs(currentData[i+2] - previousData[i+2]);
+            
+            // If the difference exceeds the sensitivity threshold, count as motion
+            if (rdiff > sensitivity || gdiff > sensitivity || bdiff > sensitivity) {
+              motionPixels++;
+            }
+          }
+          
+          // Determine if enough pixels changed to consider it motion
+          // The threshold is based on a percentage of total pixels
+          const totalSampledPixels = dataLength / 16;
+          const motionThreshold = totalSampledPixels * 0.01; // 1% of sampled pixels
+          
+          setMotionDetected(motionPixels > motionThreshold);
         }
       }
       
-      // Determine if enough pixels changed to consider it motion
-      // The threshold is based on a percentage of total pixels
-      const totalSampledPixels = currentData.length / 16;
-      const motionThreshold = totalSampledPixels * 0.01; // 1% of sampled pixels
-      
-      setMotionDetected(motionPixels > motionThreshold);
+      // Store current frame for next comparison
+      previousFrameRef.current = currentFrame;
+    } catch (err) {
+      console.error("Error in motion detection:", err);
     }
-    
-    // Store current frame for next comparison
-    previousFrameRef.current = currentFrame;
     
     // Continue the detection loop
     requestRef.current = requestAnimationFrame(detectMotion);
